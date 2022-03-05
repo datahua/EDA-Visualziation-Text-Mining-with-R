@@ -1,7 +1,7 @@
 ### EDA-Visualziation-Text-Mining-with-R
 
-- ordinary EDA
-- all kinds of aesthetic visualization
+- ordinary Explantory Data Analysis
+- all kinds of aesthetic visualization (proficiency in ggplot2)
 - text processing and mining
 
 Dataset Description:
