@@ -1,0 +1,390 @@
+---
+title: "EDA + Visualziation + Text Mining for Wine Products"
+author: "Tianze Hua"
+date: "3/5/2022"
+output: 
+  pdf_document:
+    latex_engine: xelatex
+---
+
+```{r setup, include=FALSE} 
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+```
+
+```{r}
+library(pacman)
+p_load(tidyverse, kableExtra, magrittr, 
+       knitr, ggrepel, ggwordcloud, readr, tm, 
+       SnowballC, wordcloud,RColorBrewer, wordcloud2, sjPlot)
+search()
+```
+
+```{r}
+md <-read.csv("Wine_tasting.csv",sep=",", na.strings ="" )
+```
+
+```{r}
+glimpse(md)
+```
+
+### Count the levels of character columns, range of interger columns, count number of NAs
+``` {r}
+# count levels of all the character columns
+md %>%
+  select(-"X") %>% 
+  select_if(is.character) %>%
+  mutate_all(as.factor) %>% 
+  map(levels) %>% 
+  map(length)
+
+
+md %>% 
+  select(-X) %>% 
+  select_if(is.character) %>%
+  summarize_all(funs(sum(is.na(.)))) -> lvl2
+
+# count the range of each integer columns
+md %>% 
+  select_if(is.integer) %>% 
+  na.omit() %>% 
+  lapply(range)
+
+# count the NA and blank fields in each column
+md %>% 
+  select(-X) %>% 
+  summarize_all(funs(sum(is.na(.)))) %>% 
+  t() %>% 
+  as.data.frame() %>% 
+  filter(V1>0) %>% 
+  rename(Num_of_NA = V1) ->s2
+
+# showing missing proportion of each column of our dataset
+lvl2 %>% 
+  t() %>% 
+  as.data.frame() %>% 
+  filter(V1 >0) %>% 
+  mutate(NA_prop = paste0(100*round(V1/1000, 5), "%", sep='')) %>% 
+  rename(Number_of_NA = "V1") %>% 
+  kbl(caption = "NA proportion of Each Character Columns") %>%
+  kable_classic_2(full_width = F,
+                  html_font = "Cambria")
+
+
+```
+
+### Data Cleanning
+```{r data cleanning}
+# We only going to remove the observation without country, price field.
+
+md %<>% 
+  drop_na(country, price)
+
+md %<>%
+  select(-X)
+
+# remove all the foreign characters of the entire dataset for better understanding
+md %<>% 
+  mutate_all(funs(gsub("[[:punct:]]", "", .)))
+  
+
+dim(md)
+
+
+# Don't forget to change chr price to numeric one
+md$price <- as.numeric(md$price)
+md$points <- as.numeric(md$points)
+```
+
+### Country Factor
+```{r average price by country}
+# market share by countries
+md %>% 
+  select(country,region_1) %>% 
+  group_by(country) %>% 
+  summarize(n=n()) %>%
+  filter(n>30)  %>% 
+  mutate(country = fct_reorder(country, desc(n))) %>% 
+  ggplot(aes('',n, fill=country))+
+  geom_bar(stat="identity",width=1, color = "white")+
+  theme(axis.ticks.y = element_blank(),
+      axis.text.y = element_blank(),
+      axis.text.x = element_blank())+
+  coord_polar(theta="y")+
+  scale_fill_brewer(palette = "Set3")+
+  theme_void()+
+  geom_text(aes(label=paste(round(100*n/sum(n),0),"%",sep="")), 
+            position = position_stack(vjust = 0.5),size=3)+
+  coord_polar(theta = "y")+
+  labs(title = 'Market Share by Country',
+       subtitle = "Only showing countries with more than 30 wine products")+
+  scale_fill_discrete(name = "Country")+
+  theme(plot.title = element_text(size = 13),
+        plot.subtitle = element_text(size = 8))
+  
+
+# mean price by country
+md %>% 
+  select(country, price) %>% 
+  group_by(country) %>%
+  summarize(price = round(mean(price),1)) %>% 
+  arrange(desc(as.numeric(price))) -> md_cty 
+
+md_cty %>% 
+  mutate(country = fct_reorder(country, price)) %>%  
+  ggplot(aes(country, price, fill = country))+
+  geom_bar(stat="identity", width=1, color = "white")+
+  theme_bw()+
+  theme(legend.position = "none")+
+  scale_x_discrete(
+    labels = function(country) str_wrap(country, width = 7))+
+  geom_text(aes(label=paste(price,"$", sep="")), size=3,hjust=1)+
+  coord_flip()+
+  labs(x="Country",
+       y="Average Price",
+       title = "Average Wine Price from Each Country ")
+
+md %>% 
+  select(country) %>% 
+  group_by(country) %>% 
+  summarize(n =n()) %>% 
+  arrange(desc(n)) -> mdx
+
+mdx <- c(mdx[1:5,1])
+md %>% 
+  select(country, price) %>% 
+  filter(country %in% unlist(mdx),
+         price <100) %>% 
+  mutate(country = fct_reorder(country, desc(price))) %>% 
+  ggplot(aes(country, price, fill=country))+
+  geom_boxplot()+
+  geom_jitter(size = 0.4, alpha = 0.7, color ="#7468de" )+
+  theme_bw()+
+  scale_fill_brewer(palette = "Set3")+
+  labs(title="Boxplot for Wine Price in Each Country",
+       y = "Price",
+       X = "Country")+
+  theme(legend.position="none")
+  
+# Confidence interval for all over the world and US wine mean price
+md %>% 
+  lm(price~1,.) %>% 
+  confint(level=0.99) %>% 
+  kbl(caption = "99% Confidence Interval for Average Wine Price") %>%
+  kable_classic_2(full_width = F,html_font = "Cambria")
+
+md %>% 
+  filter(country == "US") %>% 
+  lm(price~1,.) %>%
+  confint(level = 0.99) %>% 
+  kbl(caption = "99% Confidence Interval for Average Wine Price in US") %>%
+  kable_classic_2(full_width = F,html_font = "Cambria")
+
+```
+we are at a 99% confidence interval to state that the mean price of wine of US would lie between 35.8 and 42.2 dollars, and that for the world is between 33.38 and 41.34.
+
+
+### Province VS Number of Products
+```{r number of }
+colnames(md)
+
+# Province with more than 30 wine brands
+md %>% 
+  select(province) %>% 
+  group_by(province) %>% 
+  summarise(n = n()) %>% 
+  arrange(desc(n)) %>% 
+  filter(n >30) %>% 
+  mutate(province = fct_reorder(province,desc(n))) %>% 
+  ggplot(aes(province, n, fill=province)) +
+  geom_bar(stat="identity") +
+  theme_bw() +
+  labs(x = "Province", 
+       y = "number of brands of wine Products", 
+       title = "Province with more than 30 wine Products")+
+  geom_text(aes(label = n), vjust = 1.3)
+
+# if California is outstreched the scale a little bit too much
+md %>% 
+  select(province) %>% 
+  group_by(province) %>% 
+  summarise(n = n()) %>% 
+  arrange(desc(n)) %>% 
+  filter(n > 19, n < 60) %>% 
+  mutate(province = fct_reorder(province,desc(n))) %>% 
+  ggplot(aes(province, n, fill=province)) +
+  geom_bar(stat="identity") +
+  theme_bw() +
+  labs(x = "Province", 
+       y = "Number of brands of wines produced", 
+       title = "Number of wine brands of each province",
+       subtitle = "excludes Player California")+
+  geom_text(aes(label = n), vjust = -0.15, size = 3)+
+  scale_x_discrete(
+    labels = function(province) str_wrap(province, width = 2))+
+  theme(legend.position = "none")
+
+```
+
+Province vs AVG price
+```{r avg price for each province}
+md %>% 
+  select(province, price) %>% 
+  na.omit() %>% 
+  group_by(province) %>% 
+  summarize(province_avg = sum(price)/n()) %>% 
+  arrange(desc(province_avg)) -> mad2
+
+mad2 <- c(mad2[1:8,1])
+
+md %>% 
+  select(province, price) %>% 
+  na.omit() %>% 
+  group_by(province) %>% 
+  summarize(province_avg = sum(price)/n()) %>% 
+  filter(province %in% unlist(mad2)) %>% 
+  arrange(desc(province_avg)) %>% 
+  mutate(province = fct_reorder(province, province_avg)) %>% 
+  ggplot(aes(province, province_avg, fill = province))+
+  geom_bar(stat="identity")+
+  theme_bw()+
+  labs(x = "",
+       y = "Price",
+       title = "Price of wine")+
+  scale_fill_brewer(palette = "Dark2", direction = -1)+
+  scale_x_discrete(labels = function(country) str_wrap(country, width = 7))+
+  coord_flip()+
+  theme(legend.position = "none")+
+  geom_text(aes(label=paste(round(province_avg,2),"$", sep="")),hjust=1.1)+
+  labs(title = "Most Expensive Origination Province of Wine")
+  
+
+md %>% 
+  select(price) %>% 
+  filter(price<150) %>%
+  ggplot(aes(price))+
+  geom_density(fill="#69b3a2", 
+               color="#e9f0e9", 
+               alpha=0.7)+
+  theme_minimal()+
+  labs(x = "",
+       y = "price",
+       title = "Price of wine")+
+  scale_x_continuous(breaks=round(seq(0,160, by = 10),1))+
+  labs(title = "Density Function of Price Distribution",
+       subtitle = "Exclued 16 (0.017%) Products Pricing over 150$",
+       x = 'Price',
+       y = 'Density')+  
+  theme(plot.title = element_text(size = 13),
+        plot.subtitle = element_text(size = 8))
+  
+  
+```
+
+
+### Distribution of Price along with correlation between Price and Points
+```{r }
+md %>% 
+  select(country) %>% 
+  group_by(country) %>% 
+  summarize(n =n()) %>% 
+  arrange(desc(n)) -> mdx8
+
+mdx8 <- c(mdx8[1:8,1])
+md %>% 
+  select(price, points) %>% 
+  filter(price<150) %>% 
+  na.omit() %>% 
+  ggplot(aes(price))+
+  geom_histogram(bins=30, fill = "#6298d1", colour="white", lwd = 0.3)+
+  labs(title="Distribution of Wine Price",
+       x = "Price",
+       y = "Count")+
+  stat_bin(geom='text', color='black', 
+           aes(label=..count..),
+           size =3,vjust=-0.3)+
+  theme_bw()+
+  scale_x_continuous(breaks= seq(0,150,10),limit=c(0,150,15))
+
+md %>% 
+  select(price, points, country) %>% 
+  na.omit() %>% 
+  filter(country %in% unlist(mdx8)) %>% 
+  mutate(country = fct_reorder(country,desc(country))) %>% 
+  ggplot(aes(price, points))+
+  geom_jitter(aes(colour=country), alpha=0.7, size = 0.8)+
+  theme(legend.position = "bottom",
+        legend.title = element_text(size = 8),
+        legend.text = element_text(size = 8))+
+  geom_smooth()+
+  labs(title="Linear Regression for Wine Price and Points",
+       y = "Points",
+       x = "Price")+
+  scale_x_continuous(breaks= seq(0,400,20),limit=c(0,400,20))
+
+
+lm1 <- lm(points~price, data=md)
+summary(lm1)
+
+md %>% 
+  select(price, points, winery, title) %>% 
+  filter(price<150) %>% 
+  na.omit() %>% 
+  mutate(ratio = points/price) %>% 
+  ggplot(aes(price, points, colour=ratio))+
+  geom_jitter(alpha=0.7, size = 0.8)+
+  theme(legend.position = "none")+
+  geom_label_repel(aes(label = ifelse(ratio>1.05 & price > 80, winery, NA)), 
+                   box.padding = 0.5,max.overlaps = 90)+
+  labs(title="Guide for Picking the High PP Ratio Wine Under 150$",
+       y = "points",
+       x = "Price") +
+  theme(plot.title = element_text(size = 13),
+      plot.subtitle = element_text(size = 8))+
+  scale_x_continuous(breaks=round(seq(0,160, by = 20),1))+
+  scale_y_continuous(limit=c(80,100,5))
+
+
+```
+
+### Data selection for Word Mining
+```{r}
+md %>% 
+  filter(points/price> 0.8) -> md_good
+corpus = Corpus(VectorSource(md_good$description))
+corpus
+md_good$description %>% 
+  VectorSource() %>% 
+  Corpus -> corpus
+```
+
+### Word Processing
+```{r}
+corpus %>% 
+  tm_map(PlainTextDocument) %>% 
+  tm_map(tolower) %>% 
+  tm_map(removePunctuation) %>% 
+  tm_map(stemDocument, language = "english") %>%
+  tm_map(stripWhitespace) -> corpus
+
+corpus <- tm_map(corpus,removeWords, stopwords("english"))
+```
+
+```{r}
+corpus %>% 
+  TermDocumentMatrix() %>% 
+  as.matrix() %>% 
+  rowSums() %>% 
+  sort(decreasing = TRUE) -> mat1
+
+word_f <- data.frame(word = names(mat1), freq=mat1)
+```
+
+Keyword for Picking the Right Wine
+```{r wordcloud }
+word_f %>% 
+  filter(word != "wine") %>% 
+  wordcloud2()
+
+# it does not show in a pdf output
+```
+
